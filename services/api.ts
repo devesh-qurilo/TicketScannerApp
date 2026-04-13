@@ -1,7 +1,10 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
+import { type TicketScanRecord } from "../store/useAppStore";
 
-const API_BASE_URL = "https://your-api.com";
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ||
+  "https://4frnn03l-8000.inc1.devtunnels.ms";
 const OFFLINE_QUEUE_KEY = "offline-verification-queue";
 const USE_MOCK_API = API_BASE_URL.includes("your-api.com");
 
@@ -30,6 +33,18 @@ export type LoginResponse = {
   assignedEvent: string;
 };
 
+type VolunteerLoginApiResponse = {
+  status: boolean;
+  message: string;
+  data: string;
+};
+
+export type SyncScanHistoryResponse = {
+  syncedIds: string[];
+  failedIds: string[];
+  syncedAt: string;
+};
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -51,7 +66,9 @@ async function mockCreateTicket(
   };
 }
 
-async function mockVerifyTicket(ticketId: string): Promise<VerifyTicketResponse> {
+async function mockVerifyTicket(
+  ticketId: string,
+): Promise<VerifyTicketResponse> {
   await sleep(500);
 
   if (ticketId.toLowerCase().includes("used")) {
@@ -88,6 +105,39 @@ async function mockLogin(email: string): Promise<LoginResponse> {
   };
 }
 
+function formatVolunteerName(email: string): string {
+  const [localPart = "Volunteer"] = email.split("@");
+  const cleaned = localPart.replace(/[._-]+/g, " ").trim();
+
+  if (!cleaned) {
+    return "Volunteer";
+  }
+
+  return cleaned.replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function mapLoginResponse(email: string, token: string): LoginResponse {
+  return {
+    token,
+    email,
+    name: formatVolunteerName(email),
+    role: "Volunteer",
+    assignedEvent: "Assigned at check-in",
+  };
+}
+
+async function mockSyncScanHistory(
+  records: TicketScanRecord[],
+): Promise<SyncScanHistoryResponse> {
+  await sleep(700);
+
+  return {
+    syncedIds: records.map((record) => record.id),
+    failedIds: [],
+    syncedAt: new Date().toISOString(),
+  };
+}
+
 export async function createTicket(
   payload: CreateTicketPayload,
 ): Promise<CreateTicketResponse> {
@@ -95,16 +145,23 @@ export async function createTicket(
     return mockCreateTicket(payload);
   }
 
-  const response = await api.post<CreateTicketResponse>("/api/tickets/create", payload);
+  const response = await api.post<CreateTicketResponse>(
+    "/api/tickets/create",
+    payload,
+  );
   return response.data;
 }
 
-export async function verifyTicket(ticketId: string): Promise<VerifyTicketResponse> {
+export async function verifyTicket(
+  ticketId: string,
+): Promise<VerifyTicketResponse> {
   if (USE_MOCK_API) {
     return mockVerifyTicket(ticketId);
   }
 
-  const response = await api.post<VerifyTicketResponse>("/api/tickets/verify", { ticketId });
+  const response = await api.post<VerifyTicketResponse>("/api/tickets/verify", {
+    ticketId,
+  });
   return response.data;
 }
 
@@ -116,10 +173,34 @@ export async function loginVolunteer(
     return mockLogin(email);
   }
 
-  const response = await api.post<LoginResponse>("/api/auth/login", {
-    email,
-    password,
-  });
+  const response = await api.post<VolunteerLoginApiResponse>(
+    "/api/v1/admin/login-volunteer",
+    {
+      email,
+      password,
+    },
+  );
+
+  if (!response.data.status || !response.data.data) {
+    throw new Error(response.data.message || "Unable to log in.");
+  }
+
+  return mapLoginResponse(email, response.data.data);
+}
+
+export async function syncScanHistory(
+  records: TicketScanRecord[],
+): Promise<SyncScanHistoryResponse> {
+  if (USE_MOCK_API) {
+    return mockSyncScanHistory(records);
+  }
+
+  const response = await api.post<SyncScanHistoryResponse>(
+    "/api/tickets/sync-scans",
+    {
+      scans: records,
+    },
+  );
   return response.data;
 }
 

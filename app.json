@@ -24,10 +24,8 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": [
-        "android.permission.CAMERA"
-      ],
-      "package": "com.qurilo.TicketScannerApp"
+      "permissions": ["android.permission.CAMERA"],
+      "package": "com.qurilo.bharatbhaktiscanner"
     },
     "web": {
       "favicon": "./assets/favicon.png"

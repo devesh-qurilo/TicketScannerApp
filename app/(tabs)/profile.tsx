@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from "react-native";
+import axios from "axios";
 import * as Device from "expo-device";
 
 import FormField from "../../components/FormField";
@@ -26,8 +27,8 @@ export default function ProfileScreen() {
 
   const theme = getTheme(resolvedTheme);
   const [credentials, setCredentials] = useState({
-    email: user?.email ?? "volunteer@event.com",
-    password: "password123",
+    email: user?.email ?? "kush@gmail.com",
+    password: "nbc0k1Fm5J",
   });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -53,7 +54,11 @@ export default function ProfileScreen() {
       );
       login(response);
     } catch (error) {
-      Alert.alert("Login failed", "We could not sign you in right now.");
+      const errorMessage = axios.isAxiosError(error)
+        ? error.response?.data?.message || error.message
+        : "We could not sign you in right now.";
+
+      Alert.alert("Login failed", errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -86,7 +91,7 @@ export default function ProfileScreen() {
             onChangeText={(value) =>
               setCredentials((current) => ({ ...current, password: value }))
             }
-            placeholder="password123"
+            placeholder="Enter your password"
             secureTextEntry
           />
           <PrimaryButton
@@ -101,27 +106,48 @@ export default function ProfileScreen() {
           subtitle="Volunteer profile and scanner preferences."
         >
           <View style={styles.profileRow}>
-            <Text style={[styles.label, { color: theme.colors.muted }]}>Role</Text>
-            <Text style={[styles.value, { color: theme.colors.text }]}>{user.role}</Text>
+            <Text style={[styles.label, { color: theme.colors.muted }]}>
+              Role
+            </Text>
+            <Text style={[styles.value, { color: theme.colors.text }]}>
+              {user.role}
+            </Text>
           </View>
           <View style={styles.profileRow}>
-            <Text style={[styles.label, { color: theme.colors.muted }]}>Assigned Event</Text>
-            <Text style={[styles.value, { color: theme.colors.text }]}>{user.assignedEvent}</Text>
+            <Text style={[styles.label, { color: theme.colors.muted }]}>
+              Assigned Event
+            </Text>
+            <Text style={[styles.value, { color: theme.colors.text }]}>
+              {user.assignedEvent}
+            </Text>
           </View>
           <View style={styles.profileRow}>
-            <Text style={[styles.label, { color: theme.colors.muted }]}>Email</Text>
-            <Text style={[styles.value, { color: theme.colors.text }]}>{user.email}</Text>
+            <Text style={[styles.label, { color: theme.colors.muted }]}>
+              Email
+            </Text>
+            <Text style={[styles.value, { color: theme.colors.text }]}>
+              {user.email}
+            </Text>
           </View>
           <PrimaryButton label="Logout" onPress={logout} variant="danger" />
         </InfoCard>
       )}
 
-      <InfoCard title="Settings" subtitle="Keep the volunteer device ready for shifts.">
+      <InfoCard
+        title="Settings"
+        subtitle="Keep the volunteer device ready for shifts."
+      >
         <View style={styles.settingsRow}>
           <View>
-            <Text style={[styles.settingTitle, { color: theme.colors.text }]}>Dark mode</Text>
-            <Text style={[styles.settingCaption, { color: theme.colors.muted }]}>
-              {themeMode === "dark" ? "Dark theme enabled" : "Light theme enabled"}
+            <Text style={[styles.settingTitle, { color: theme.colors.text }]}>
+              Dark mode
+            </Text>
+            <Text
+              style={[styles.settingCaption, { color: theme.colors.muted }]}
+            >
+              {themeMode === "dark"
+                ? "Dark theme enabled"
+                : "Light theme enabled"}
             </Text>
           </View>
           <Switch
@@ -135,8 +161,12 @@ export default function ProfileScreen() {
         </View>
         <View style={styles.settingsRow}>
           <View style={styles.deviceBlock}>
-            <Text style={[styles.settingTitle, { color: theme.colors.text }]}>Device ID</Text>
-            <Text style={[styles.settingCaption, { color: theme.colors.muted }]}>
+            <Text style={[styles.settingTitle, { color: theme.colors.text }]}>
+              Device ID
+            </Text>
+            <Text
+              style={[styles.settingCaption, { color: theme.colors.muted }]}
+            >
               {deviceId}
             </Text>
           </View>

@@ -5,9 +5,15 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { type LoginResponse } from "../services/api";
 
 export type TicketScanRecord = {
+  id: string;
   ticketId: string;
-  status: "valid" | "invalid" | "used";
+  rawValue: string;
+  status: "valid" | "invalid" | "used" | "queued";
+  message: string;
+  attendeeName?: string;
   checkedAt: string;
+  syncStatus: "pending" | "synced" | "failed";
+  syncedAt?: string;
 };
 
 type ThemeMode = "light" | "dark" | "system";
@@ -19,6 +25,7 @@ type AppStore = {
   resolvedTheme: ResolvedTheme;
   lastScannedTicket: TicketScanRecord | null;
   offlineQueue: string[];
+  scanHistory: TicketScanRecord[];
   login: (user: LoginResponse) => void;
   logout: () => void;
   setThemeMode: (mode: ThemeMode) => void;
@@ -26,6 +33,9 @@ type AppStore = {
   hydrateResolvedTheme: () => void;
   setLastScannedTicket: (ticket: TicketScanRecord | null) => void;
   setOfflineQueue: (queue: string[]) => void;
+  addScanRecord: (ticket: TicketScanRecord) => void;
+  markScanRecordsSynced: (ids: string[], syncedAt: string) => void;
+  markScanRecordsFailed: (ids: string[]) => void;
 };
 
 export const useAppStore = create<AppStore>()(
@@ -36,6 +46,7 @@ export const useAppStore = create<AppStore>()(
       resolvedTheme: "light",
       lastScannedTicket: null,
       offlineQueue: [],
+      scanHistory: [],
       login: (user) => set({ user }),
       logout: () => set({ user: null }),
       setThemeMode: (mode) =>
@@ -61,6 +72,26 @@ export const useAppStore = create<AppStore>()(
       },
       setLastScannedTicket: (ticket) => set({ lastScannedTicket: ticket }),
       setOfflineQueue: (queue) => set({ offlineQueue: queue }),
+      addScanRecord: (ticket) =>
+        set((state) => ({
+          scanHistory: [ticket, ...state.scanHistory].slice(0, 100),
+        })),
+      markScanRecordsSynced: (ids, syncedAt) =>
+        set((state) => ({
+          scanHistory: state.scanHistory.map((record) =>
+            ids.includes(record.id)
+              ? { ...record, syncStatus: "synced", syncedAt }
+              : record,
+          ),
+        })),
+      markScanRecordsFailed: (ids) =>
+        set((state) => ({
+          scanHistory: state.scanHistory.map((record) =>
+            ids.includes(record.id)
+              ? { ...record, syncStatus: "failed" }
+              : record,
+          ),
+        })),
     }),
     {
       name: "ticket-system-store",
@@ -71,6 +102,7 @@ export const useAppStore = create<AppStore>()(
         resolvedTheme: state.resolvedTheme,
         lastScannedTicket: state.lastScannedTicket,
         offlineQueue: state.offlineQueue,
+        scanHistory: state.scanHistory,
       }),
     },
   ),
