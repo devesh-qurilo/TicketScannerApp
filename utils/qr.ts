@@ -9,7 +9,12 @@ export function extractTicketId(rawValue: string): string | null {
   } catch (error) {
     if (rawValue.startsWith("http")) {
       const url = new URL(rawValue);
-      return url.searchParams.get("ticketId") ?? rawValue.trim();
+      return (
+        url.searchParams.get("u_id") ??
+        url.searchParams.get("ticketId") ??
+        url.searchParams.get("id") ??
+        rawValue.trim()
+      );
     }
 
     return rawValue.trim();

@@ -12,6 +12,54 @@ export type VerifyTicketResponse = {
   status: "valid" | "invalid" | "used";
   attendeeName?: string;
   message?: string;
+  ticketId?: string;
+  email?: string;
+  totalTicket?: number;
+  allowVisitors?: number;
+  paymentStatus?: string;
+  isUsed?: boolean;
+};
+
+export type TicketDetailResponse = {
+  status: "valid" | "invalid" | "used";
+  message: string;
+  ticketId: string;
+  attendeeName?: string;
+  email?: string;
+  phone?: string;
+  totalTicket?: number;
+  amount?: number;
+  allowVisitors?: number;
+  paymentStatus?: string;
+  isUsed?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type VerifyTicketEntryResponse = {
+  status: boolean;
+  message: string;
+};
+
+type VerifyTicketApiData = {
+  _id: string;
+  email: string;
+  u_id: string;
+  phone: string;
+  totalTicket: number;
+  amount: number;
+  allowVisitors: number;
+  paymentStatus: string;
+  isUsed: boolean;
+  createdAt: string;
+  updatedAt: string;
+  __v: number;
+};
+
+type VerifyTicketApiResponse = {
+  status: boolean;
+  message: string;
+  data?: VerifyTicketApiData;
 };
 
 export type CreateTicketPayload = {
@@ -90,6 +138,41 @@ async function mockVerifyTicket(
     status: "valid",
     attendeeName: "Demo Guest",
     message: "Ticket verified successfully.",
+    ticketId,
+  };
+}
+
+async function mockFetchTicketDetail(
+  ticketId: string,
+): Promise<TicketDetailResponse> {
+  await sleep(500);
+
+  if (ticketId.toLowerCase().includes("invalid")) {
+    return {
+      status: "invalid",
+      message: "Ticket not recognised for this event.",
+      ticketId,
+    };
+  }
+
+  const isUsed = ticketId.toLowerCase().includes("used");
+
+  return {
+    status: isUsed ? "used" : "valid",
+    message: isUsed
+      ? "This ticket has already been used."
+      : "Ticket details loaded successfully.",
+    ticketId,
+    attendeeName: "demo@example.com",
+    email: "demo@example.com",
+    phone: "1234567890",
+    totalTicket: 5,
+    amount: 100,
+    allowVisitors: isUsed ? 0 : 5,
+    paymentStatus: "pending",
+    isUsed,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
 }
 
@@ -159,10 +242,114 @@ export async function verifyTicket(
     return mockVerifyTicket(ticketId);
   }
 
-  const response = await api.post<VerifyTicketResponse>("/api/tickets/verify", {
-    ticketId,
-  });
-  return response.data;
+  const response = await api.get<VerifyTicketApiResponse>(
+    "/api/v1/booking/ticket-verify",
+    {
+      params: {
+        u_id: ticketId,
+      },
+    },
+  );
+
+  if (!response.data.status || !response.data.data) {
+    return {
+      status: "invalid",
+      ticketId,
+      message:
+        response.data.message || "The scanned ticket could not be verified.",
+    };
+  }
+
+  const booking = response.data.data;
+
+  return {
+    status: booking.isUsed ? "used" : "valid",
+    ticketId: booking.u_id,
+    attendeeName: booking.email,
+    email: booking.email,
+    totalTicket: booking.totalTicket,
+    allowVisitors: booking.allowVisitors,
+    paymentStatus: booking.paymentStatus,
+    isUsed: booking.isUsed,
+    message: booking.isUsed
+      ? `Ticket already used for ${booking.email}.`
+      : `${booking.email} is valid for ${booking.allowVisitors} visitor${booking.allowVisitors === 1 ? "" : "s"}.`,
+  };
+}
+
+export async function fetchTicketDetail(
+  ticketId: string,
+): Promise<TicketDetailResponse> {
+  if (USE_MOCK_API) {
+    return mockFetchTicketDetail(ticketId);
+  }
+
+  const response = await api.get<VerifyTicketApiResponse>(
+    "/api/v1/booking/ticket-detail",
+    {
+      params: {
+        u_id: ticketId,
+      },
+    },
+  );
+
+  if (!response.data.status || !response.data.data) {
+    return {
+      status: "invalid",
+      message: response.data.message || "The scanned ticket could not be found.",
+      ticketId,
+    };
+  }
+
+  const booking = response.data.data;
+
+  return {
+    status: booking.isUsed ? "used" : "valid",
+    message: booking.isUsed
+      ? `Ticket already used for ${booking.email}.`
+      : "Ticket details loaded successfully.",
+    ticketId: booking.u_id,
+    attendeeName: booking.email,
+    email: booking.email,
+    phone: booking.phone,
+    totalTicket: booking.totalTicket,
+    amount: booking.amount,
+    allowVisitors: booking.allowVisitors,
+    paymentStatus: booking.paymentStatus,
+    isUsed: booking.isUsed,
+    createdAt: booking.createdAt,
+    updatedAt: booking.updatedAt,
+  };
+}
+
+export async function verifyTicketEntry(
+  ticketId: string,
+  allowUser: number,
+): Promise<VerifyTicketEntryResponse> {
+  if (USE_MOCK_API) {
+    await sleep(500);
+    return {
+      status: true,
+      message: `Entry allowed for ${allowUser} visitor${allowUser === 1 ? "" : "s"}.`,
+    };
+  }
+
+  const response = await api.put<VerifyTicketEntryResponse>(
+    "/api/v1/booking/ticket-verify",
+    {
+      allow_user: allowUser,
+    },
+    {
+      params: {
+        u_id: ticketId,
+      },
+    },
+  );
+
+  return {
+    status: response.data.status,
+    message: response.data.message || "Ticket verification completed.",
+  };
 }
 
 export async function loginVolunteer(
