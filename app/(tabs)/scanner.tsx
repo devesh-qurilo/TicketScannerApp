@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -49,26 +51,119 @@ const defaultState: ScanState = {
   message: "Point the camera at a ticket QR code to validate entry.",
 };
 
+// ─── Animated scan line ───────────────────────────────────────────────────────
+function ScanLine({ color }: { color: string }) {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 2000,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(anim, {
+          toValue: 0,
+          duration: 2000,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
+  }, [anim]);
+
+  const translateY = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 160],
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.scanLine,
+        { backgroundColor: color, transform: [{ translateY }] },
+      ]}
+    />
+  );
+}
+
+// ─── Detail row ───────────────────────────────────────────────────────────────
+function DetailRow({
+  label,
+  value,
+  valueColor,
+  theme,
+}: {
+  label: string;
+  value: string | number;
+  valueColor?: string;
+  theme: ReturnType<typeof getTheme>;
+}) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
+        {label}
+      </Text>
+      <Text
+        style={[styles.metaValue, { color: valueColor ?? theme.colors.text }]}
+      >
+        {String(value)}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Badge ────────────────────────────────────────────────────────────────────
+function StatusBadge({
+  value,
+  theme,
+}: {
+  value: string;
+  theme: ReturnType<typeof getTheme>;
+}) {
+  const isPaid = value === "paid" || value === "success";
+  return (
+    <View
+      style={[
+        styles.badge,
+        {
+          backgroundColor: isPaid
+            ? theme.colors.successSubtle
+            : theme.colors.warningSubtle,
+          borderColor: isPaid ? theme.colors.success : theme.colors.warning,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.badgeText,
+          { color: isPaid ? theme.colors.success : theme.colors.warning },
+        ]}
+      >
+        {value.toUpperCase()}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Main screen ─────────────────────────────────────────────────────────────
 export default function ScannerScreen() {
-  const resolvedTheme = useAppStore((state) => state.resolvedTheme);
-  const lastScannedTicket = useAppStore((state) => state.lastScannedTicket);
-  const offlineQueue = useAppStore((state) => state.offlineQueue);
-  const scanHistory = useAppStore((state) => state.scanHistory);
-  const setLastScannedTicket = useAppStore(
-    (state) => state.setLastScannedTicket,
-  );
-  const setOfflineQueue = useAppStore((state) => state.setOfflineQueue);
-  const addScanRecord = useAppStore((state) => state.addScanRecord);
-  const markScanRecordsSynced = useAppStore(
-    (state) => state.markScanRecordsSynced,
-  );
-  const markScanRecordsFailed = useAppStore(
-    (state) => state.markScanRecordsFailed,
-  );
+  const resolvedTheme = useAppStore((s) => s.resolvedTheme);
+  const lastScannedTicket = useAppStore((s) => s.lastScannedTicket);
+  const offlineQueue = useAppStore((s) => s.offlineQueue);
+  const scanHistory = useAppStore((s) => s.scanHistory);
+  const setLastScannedTicket = useAppStore((s) => s.setLastScannedTicket);
+  const setOfflineQueue = useAppStore((s) => s.setOfflineQueue);
+  const addScanRecord = useAppStore((s) => s.addScanRecord);
+  const markScanRecordsSynced = useAppStore((s) => s.markScanRecordsSynced);
+  const markScanRecordsFailed = useAppStore((s) => s.markScanRecordsFailed);
 
   const theme = getTheme(resolvedTheme);
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice("back");
+
   const [isTorchOn, setIsTorchOn] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [isSyncingTable, setIsSyncingTable] = useState(false);
@@ -78,11 +173,23 @@ export default function ScannerScreen() {
   const [selectedBooking, setSelectedBooking] =
     useState<TicketDetailResponse | null>(null);
   const [allowUserInput, setAllowUserInput] = useState("");
+
   const lastHandledRef = useRef<{ ticketId: string; at: number } | null>(null);
   const successSoundRef = useRef<Audio.Sound | null>(null);
   const errorSoundRef = useRef<Audio.Sound | null>(null);
 
-  console.log("allow data", selectedBooking);
+  // ── Camera overlay color ──────────────────────────────────────────────────
+  const overlayColor = useMemo(() => {
+    const map: Record<ScanState["status"], string> = {
+      idle: theme.colors.primary,
+      success: theme.colors.success,
+      warning: theme.colors.warning,
+      error: theme.colors.error,
+    };
+    return map[scanState.status];
+  }, [scanState.status, theme.colors]);
+
+  // ── Navigation focus ──────────────────────────────────────────────────────
   useFocusEffect(
     useCallback(() => {
       setIsFocused(true);
@@ -90,89 +197,74 @@ export default function ScannerScreen() {
     }, []),
   );
 
+  // ── Permissions & queue init ──────────────────────────────────────────────
   useEffect(() => {
     void requestPermission();
   }, [requestPermission]);
-
   useEffect(() => {
     void getOfflineQueue().then(setOfflineQueue);
   }, [setOfflineQueue]);
 
+  // ── Audio setup ───────────────────────────────────────────────────────────
   useEffect(() => {
-    let isMounted = true;
-
-    const prepareAudio = async () => {
+    let mounted = true;
+    (async () => {
       await Audio.setAudioModeAsync({
         playsInSilentModeIOS: true,
         shouldDuckAndroid: true,
       });
-
-      const successSound = new Audio.Sound();
-      const errorSound = new Audio.Sound();
-
-      await successSound.loadAsync(require("../../assets/sounds/success.wav"));
-      await errorSound.loadAsync(require("../../assets/sounds/error.wav"));
-
-      if (!isMounted) {
-        await successSound.unloadAsync();
-        await errorSound.unloadAsync();
+      const s = new Audio.Sound();
+      const e = new Audio.Sound();
+      await s.loadAsync(require("../../assets/sounds/success.wav"));
+      await e.loadAsync(require("../../assets/sounds/error.wav"));
+      if (!mounted) {
+        await s.unloadAsync();
+        await e.unloadAsync();
         return;
       }
-
-      successSoundRef.current = successSound;
-      errorSoundRef.current = errorSound;
-    };
-
-    void prepareAudio();
-
+      successSoundRef.current = s;
+      errorSoundRef.current = e;
+    })();
     return () => {
-      isMounted = false;
+      mounted = false;
       void successSoundRef.current?.unloadAsync();
       void errorSoundRef.current?.unloadAsync();
     };
   }, []);
 
+  // ── Haptic + audio feedback ───────────────────────────────────────────────
   const feedback = useCallback(async (status: ScanState["status"]) => {
-    const playSound = async (sound: Audio.Sound | null) => {
-      if (!sound) {
-        return;
-      }
-
-      await sound.replayAsync();
+    const play = async (snd: Audio.Sound | null) => {
+      if (snd) await snd.replayAsync();
     };
-
     if (status === "success") {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Vibration.vibrate(120);
-      await playSound(successSoundRef.current);
-      return;
-    }
-
-    if (status === "warning") {
+      await play(successSoundRef.current);
+    } else if (status === "warning") {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       Vibration.vibrate([0, 100, 80, 100]);
-      await playSound(errorSoundRef.current);
-      return;
-    }
-
-    if (status === "error") {
+      await play(errorSoundRef.current);
+    } else if (status === "error") {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Vibration.vibrate([0, 180, 120, 180]);
-      await playSound(errorSoundRef.current);
+      await play(errorSoundRef.current);
     }
   }, []);
 
+  // ── QR processing ─────────────────────────────────────────────────────────
   const processTicket = useCallback(
     async (rawValue: string) => {
       const ticketId = extractTicketId(rawValue);
       const checkedAt = new Date().toISOString();
+
       if (!ticketId) {
         addScanRecord({
           id: `${Date.now()}-invalid`,
           ticketId: "UNKNOWN",
           rawValue,
           status: "invalid",
-          message: "This QR code does not contain a usable ticket ID.",
+          message: "QR code has no usable ticket ID.",
           checkedAt,
           syncStatus: "pending",
         });
@@ -189,102 +281,88 @@ export default function ScannerScreen() {
       if (
         lastHandledRef.current?.ticketId === ticketId &&
         now - lastHandledRef.current.at < SCAN_DEBOUNCE_MS
-      ) {
+      )
         return;
-      }
-
       lastHandledRef.current = { ticketId, at: now };
       setIsBusy(true);
 
       try {
         const result = await fetchTicketDetail(ticketId);
-        const resolvedTicketId = result.ticketId ?? ticketId;
-        const resultSummary =
+        const resolvedId = result.ticketId ?? ticketId;
+        const summary =
           result.message ??
           (result.status === "used"
             ? "This ticket has already been checked in."
             : "Ticket details loaded successfully.");
 
+        const baseRecord = {
+          id: `${Date.now()}-${resolvedId}`,
+          ticketId: resolvedId,
+          rawValue,
+          checkedAt,
+          syncStatus: "pending" as const,
+          attendeeName: result.attendeeName,
+        };
+
         if (result.status === "valid") {
-          const remainingVisitors = result.allowVisitors ?? 0;
-          const defaultAllowUser =
-            remainingVisitors > 0 ? "1" : "";
-          const record = {
-            id: `${Date.now()}-${resolvedTicketId}`,
-            ticketId: resolvedTicketId,
-            rawValue,
-            status: "valid" as const,
-            message: resultSummary,
-            attendeeName: result.attendeeName,
-            checkedAt,
-            syncStatus: "pending" as const,
-          };
+          const remaining = result.allowVisitors ?? 0;
+          addScanRecord({ ...baseRecord, status: "valid", message: summary });
           setScanState({
             status: "success",
             title: "Ticket Found",
-            message: resultSummary,
+            message: summary,
           });
           setSelectedBooking(result);
-          setAllowUserInput(defaultAllowUser);
-          setLastScannedTicket(record);
-          addScanRecord(record);
+          setAllowUserInput(remaining > 0 ? "1" : "");
+          setLastScannedTicket({
+            ...baseRecord,
+            status: "valid",
+            message: summary,
+          });
           await feedback("success");
           return;
         }
 
         if (result.status === "used") {
-          const record = {
-            id: `${Date.now()}-${resolvedTicketId}`,
-            ticketId: resolvedTicketId,
-            rawValue,
-            status: "used" as const,
-            message: resultSummary,
-            attendeeName: result.attendeeName,
-            checkedAt,
-            syncStatus: "pending" as const,
-          };
+          addScanRecord({ ...baseRecord, status: "used", message: summary });
           setScanState({
             status: "warning",
             title: "Already Used",
-            message: resultSummary,
+            message: summary,
           });
           setSelectedBooking(result);
           setAllowUserInput("");
-          setLastScannedTicket(record);
-          addScanRecord(record);
+          setLastScannedTicket({
+            ...baseRecord,
+            status: "used",
+            message: summary,
+          });
           await feedback("warning");
           return;
         }
 
-        const record = {
-          id: `${Date.now()}-${resolvedTicketId}`,
-          ticketId: resolvedTicketId,
-          rawValue,
-          status: "invalid" as const,
-          message: resultSummary,
-          attendeeName: result.attendeeName,
-          checkedAt,
-          syncStatus: "pending" as const,
-        };
+        addScanRecord({ ...baseRecord, status: "invalid", message: summary });
         setScanState({
           status: "error",
           title: "Invalid Ticket",
-          message: resultSummary,
+          message: summary,
         });
         setSelectedBooking(null);
         setAllowUserInput("");
-        setLastScannedTicket(record);
-        addScanRecord(record);
+        setLastScannedTicket({
+          ...baseRecord,
+          status: "invalid",
+          message: summary,
+        });
         await feedback("error");
-      } catch (error) {
+      } catch {
         const queued = await enqueueVerification(ticketId);
         const record = {
           id: `${Date.now()}-${ticketId}`,
           ticketId,
           rawValue,
           status: "queued" as const,
-          message:
-            "Verification was queued locally because the device is offline.",
+          message: "Queued locally — device is offline.",
           checkedAt,
           syncStatus: "pending" as const,
         };
@@ -296,8 +374,7 @@ export default function ScannerScreen() {
         setScanState({
           status: "warning",
           title: "Queued for retry",
-          message:
-            "The device is offline right now, so this validation was stored locally.",
+          message: "Device is offline. Validation stored locally.",
         });
         await feedback("warning");
       } finally {
@@ -307,29 +384,26 @@ export default function ScannerScreen() {
     [addScanRecord, feedback, setLastScannedTicket, setOfflineQueue],
   );
 
+  // ── Visitor entry submit ──────────────────────────────────────────────────
   const submitAllowedVisitors = useCallback(async () => {
-    if (!selectedBooking?.ticketId) {
-      return;
-    }
-
+    if (!selectedBooking?.ticketId) return;
     const allowUser = Number.parseInt(allowUserInput, 10);
-    const remainingVisitors = selectedBooking.allowVisitors ?? 0;
+    const remaining = selectedBooking.allowVisitors ?? 0;
 
     if (!Number.isInteger(allowUser) || allowUser <= 0) {
       setScanState({
         status: "error",
         title: "Invalid count",
-        message: "Enter a valid number of visitors to allow.",
+        message: "Enter a valid number of visitors.",
       });
       await feedback("error");
       return;
     }
-
-    if (allowUser > remainingVisitors) {
+    if (allowUser > remaining) {
       setScanState({
         status: "error",
         title: "Count too high",
-        message: `You can allow up to ${remainingVisitors} visitor${remainingVisitors === 1 ? "" : "s"} for this ticket.`,
+        message: `You can allow up to ${remaining} visitor${remaining === 1 ? "" : "s"}.`,
       });
       await feedback("error");
       return;
@@ -341,28 +415,26 @@ export default function ScannerScreen() {
         selectedBooking.ticketId,
         allowUser,
       );
-      const nextAllowVisitors = Math.max(remainingVisitors - allowUser, 0);
-      const isUsed = nextAllowVisitors === 0;
-
+      const nextAllowed = Math.max(remaining - allowUser, 0);
+      const isUsed = nextAllowed === 0;
       setSelectedBooking({
         ...selectedBooking,
-        allowVisitors: nextAllowVisitors,
+        allowVisitors: nextAllowed,
         isUsed,
         updatedAt: new Date().toISOString(),
       });
-      setAllowUserInput(nextAllowVisitors > 0 ? "1" : "");
+      setAllowUserInput(nextAllowed > 0 ? "1" : "");
       setScanState({
         status: "success",
         title: "Visitors Allowed",
         message: result.message,
       });
       await feedback("success");
-    } catch (error) {
+    } catch {
       setScanState({
         status: "error",
         title: "Verification failed",
-        message:
-          "We could not update the allowed visitor count for this ticket.",
+        message: "Could not update allowed visitor count.",
       });
       await feedback("error");
     } finally {
@@ -370,18 +442,17 @@ export default function ScannerScreen() {
     }
   }, [allowUserInput, feedback, selectedBooking]);
 
+  // ── QR scanner hook ───────────────────────────────────────────────────────
   const codeScanner = useCodeScanner({
     codeTypes: ["qr"],
     onCodeScanned: (codes) => {
       const [first] = codes;
-      if (!first?.value || isBusy) {
-        return;
-      }
-
+      if (!first?.value || isBusy) return;
       void processTicket(first.value);
     },
   });
 
+  // ── Offline queue retry ───────────────────────────────────────────────────
   const retryQueue = useCallback(async () => {
     setIsBusy(true);
     try {
@@ -394,35 +465,30 @@ export default function ScannerScreen() {
         message:
           remaining.length === 0
             ? "All offline verifications were retried successfully."
-            : `${remaining.length} verification${remaining.length === 1 ? "" : "s"} still waiting for network.`,
+            : `${remaining.length} verification${remaining.length === 1 ? "" : "s"} still waiting.`,
       });
     } finally {
       setIsBusy(false);
     }
   }, [setOfflineQueue]);
 
+  // ── History sync ──────────────────────────────────────────────────────────
   const syncHistoryTable = useCallback(async () => {
-    const pendingRecords = scanHistory.filter(
-      (record) => record.syncStatus !== "synced",
-    );
-    if (pendingRecords.length === 0) {
+    const pending = scanHistory.filter((r) => r.syncStatus !== "synced");
+    if (pending.length === 0) {
       setScanState({
         status: "success",
         title: "Already synced",
-        message: "All stored scan records are already synced with the backend.",
+        message: "All records are synced with the backend.",
       });
       return;
     }
-
     setIsSyncingTable(true);
     try {
-      const result = await syncScanHistory(pendingRecords);
-      if (result.syncedIds.length > 0) {
+      const result = await syncScanHistory(pending);
+      if (result.syncedIds.length > 0)
         markScanRecordsSynced(result.syncedIds, result.syncedAt);
-      }
-      if (result.failedIds.length > 0) {
-        markScanRecordsFailed(result.failedIds);
-      }
+      if (result.failedIds.length > 0) markScanRecordsFailed(result.failedIds);
       setScanState({
         status: result.failedIds.length === 0 ? "success" : "warning",
         title:
@@ -431,15 +497,15 @@ export default function ScannerScreen() {
             : "Partial sync complete",
         message:
           result.failedIds.length === 0
-            ? `${result.syncedIds.length} scan record${result.syncedIds.length === 1 ? "" : "s"} synced to the backend.`
-            : `${result.syncedIds.length} synced, ${result.failedIds.length} still pending.`,
+            ? `${result.syncedIds.length} record${result.syncedIds.length === 1 ? "" : "s"} synced.`
+            : `${result.syncedIds.length} synced, ${result.failedIds.length} pending.`,
       });
-    } catch (error) {
-      markScanRecordsFailed(pendingRecords.map((record) => record.id));
+    } catch {
+      markScanRecordsFailed(pending.map((r) => r.id));
       setScanState({
         status: "error",
         title: "Sync failed",
-        message: "We could not upload the stored scan table to the backend.",
+        message: "Could not upload scan table to backend.",
       });
     } finally {
       setIsSyncingTable(false);
@@ -447,29 +513,32 @@ export default function ScannerScreen() {
   }, [markScanRecordsFailed, markScanRecordsSynced, scanHistory]);
 
   const scannerEnabled = hasPermission && !!device && isFocused;
-  const overlayColor = useMemo(() => {
-    if (scanState.status === "success") {
-      return theme.colors.success;
-    }
-    if (scanState.status === "warning") {
-      return theme.colors.warning;
-    }
-    if (scanState.status === "error") {
-      return theme.colors.error;
-    }
-    return theme.colors.primary;
-  }, [scanState.status, theme.colors]);
-
   const pendingSyncCount = scanHistory.filter(
-    (record) => record.syncStatus !== "synced",
+    (r) => r.syncStatus !== "synced",
   ).length;
 
+  // ── Stepper helpers ───────────────────────────────────────────────────────
+  const stepperValue = Number.parseInt(allowUserInput || "1", 10);
+  const maxVisitors = selectedBooking?.allowVisitors ?? 0;
+  const ticketExhausted = selectedBooking?.isUsed || maxVisitors === 0;
+
+  const decrement = () =>
+    setAllowUserInput((v) =>
+      String(Math.max(1, Number.parseInt(v || "1", 10) - 1)),
+    );
+  const increment = () =>
+    setAllowUserInput((v) =>
+      String(Math.min(maxVisitors, Number.parseInt(v || "1", 10) + 1)),
+    );
+
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <ScrollView
       style={[styles.screen, { backgroundColor: theme.colors.background }]}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
+      {/* ── Camera ──────────────────────────────────────────────────────── */}
       <View style={styles.hero}>
         {scannerEnabled ? (
           <View
@@ -485,31 +554,55 @@ export default function ScannerScreen() {
               codeScanner={codeScanner}
               torch={isTorchOn ? "on" : "off"}
             />
-            <View style={[styles.scanGuide, { borderColor: overlayColor }]} />
+
+            {/* Corner guides */}
+            <View style={[styles.scanGuide, { borderColor: overlayColor }]}>
+              <ScanLine color={overlayColor} />
+            </View>
+
+            {/* Torch toggle */}
             <Pressable
               accessibilityRole="button"
-              onPress={() => setIsTorchOn((value) => !value)}
-              style={[
+              onPress={() => setIsTorchOn((v) => !v)}
+              style={({ pressed }) => [
                 styles.flashButton,
-                { backgroundColor: theme.colors.surface },
+                {
+                  backgroundColor: isTorchOn
+                    ? `${overlayColor}30`
+                    : theme.colors.surface,
+                  opacity: pressed ? 0.75 : 1,
+                },
               ]}
             >
               <MaterialCommunityIcons
                 name={isTorchOn ? "flashlight-off" : "flashlight"}
-                size={20}
-                color={theme.colors.text}
+                size={18}
+                color={isTorchOn ? overlayColor : theme.colors.text}
               />
               <Text
-                style={[styles.flashButtonLabel, { color: theme.colors.text }]}
+                style={[
+                  styles.flashButtonLabel,
+                  { color: isTorchOn ? overlayColor : theme.colors.text },
+                ]}
               >
                 {isTorchOn ? "Flash Off" : "Flash On"}
               </Text>
             </Pressable>
+
+            {/* Live label */}
+            <View style={styles.liveTag}>
+              <View
+                style={[styles.liveDot, { backgroundColor: overlayColor }]}
+              />
+              <Text style={[styles.liveText, { color: overlayColor }]}>
+                LIVE
+              </Text>
+            </View>
           </View>
         ) : (
           <InfoCard
             title="Camera access needed"
-            subtitle="Vision Camera requires a development build. Grant camera permission to start scanning."
+            subtitle="Grant camera permission to start scanning tickets."
           >
             <PrimaryButton
               label="Allow Camera"
@@ -519,126 +612,140 @@ export default function ScannerScreen() {
         )}
       </View>
 
+      {/* ── Status banner ─────────────────────────────────────────────────── */}
       <StatusBanner
         status={scanState.status}
         title={scanState.title}
         message={scanState.message}
       />
 
+      {/* ── Scanner controls ───────────────────────────────────────────────── */}
       <InfoCard
         title="Scanner controls"
-        subtitle="Duplicate scans are blocked for 2.5 seconds so one ticket only validates once per pass."
+        subtitle="Duplicate scans are blocked for 2.5 s so one ticket only validates once per pass."
       >
-        <View style={styles.metaRow}>
-          <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-            Last ticket
-          </Text>
-          <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-            {lastScannedTicket?.ticketId ?? "None yet"}
-          </Text>
-        </View>
-        <View style={styles.metaRow}>
-          <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-            Offline queue
-          </Text>
-          <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-            {offlineQueue.length} pending
-          </Text>
-        </View>
-        <View style={styles.metaRow}>
-          <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-            History sync
-          </Text>
-          <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-            {pendingSyncCount} pending
-          </Text>
-        </View>
+        <MetaRow
+          label="Last ticket"
+          value={lastScannedTicket?.ticketId ?? "None yet"}
+          theme={theme}
+        />
+        <MetaRow
+          label="Offline queue"
+          value={`${offlineQueue.length} pending`}
+          theme={theme}
+          highlight={offlineQueue.length > 0}
+        />
+        <MetaRow
+          label="History sync"
+          value={`${pendingSyncCount} pending`}
+          theme={theme}
+          highlight={pendingSyncCount > 0}
+        />
         <PrimaryButton
-          label={isBusy ? "Working..." : "Retry Offline Queue"}
+          label={isBusy ? "Working…" : "Retry Offline Queue"}
           onPress={() => void retryQueue()}
           disabled={isBusy || offlineQueue.length === 0}
           variant="secondary"
         />
       </InfoCard>
+
+      {/* ── Ticket details ─────────────────────────────────────────────────── */}
       <InfoCard
         title="Ticket details"
-        subtitle="After scanning, the same ticket code is sent in params, booking details are loaded, and the volunteer can verify how many people are allowed."
+        subtitle="Booking details load after scan. Adjust visitor count and tap Verify."
       >
         {selectedBooking ? (
           <>
+            {/* Detail grid */}
             <View style={styles.detailGrid}>
-              <View style={styles.detailRow}>
-                <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-                  Ticket ID
-                </Text>
-                <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-                  {selectedBooking.ticketId}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-                  Email
-                </Text>
-                <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-                  {selectedBooking.email ?? "-"}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-                  Phone
-                </Text>
-                <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-                  {selectedBooking.phone ?? "-"}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-                  Total Ticket
-                </Text>
-                <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-                  {selectedBooking.totalTicket ?? 0}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-                  Amount
-                </Text>
-                <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-                  {selectedBooking.amount ?? 0}
-                </Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
-                  Allowed Left
-                </Text>
-                <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-                  {selectedBooking.allowVisitors ?? 0}
-                </Text>
-              </View>
+              <DetailRow
+                label="Ticket ID"
+                value={selectedBooking.ticketId}
+                theme={theme}
+                valueColor={theme.colors.primary}
+              />
+              <DetailRow
+                label="Email"
+                value={selectedBooking.email ?? "—"}
+                theme={theme}
+              />
+              <DetailRow
+                label="Phone"
+                value={selectedBooking.phone ?? "—"}
+                theme={theme}
+              />
+              <DetailRow
+                label="Total Ticket"
+                value={selectedBooking.totalTicket ?? 0}
+                theme={theme}
+              />
+              <DetailRow
+                label="Amount"
+                value={selectedBooking.amount ?? 0}
+                theme={theme}
+              />
+              <DetailRow
+                label="Allowed Left"
+                value={selectedBooking.allowVisitors ?? 0}
+                theme={theme}
+                valueColor={
+                  maxVisitors > 0 ? theme.colors.success : theme.colors.error
+                }
+              />
+
+              {/* Payment badge */}
               <View style={styles.detailRow}>
                 <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
                   Payment
                 </Text>
-                <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-                  {selectedBooking.paymentStatus ?? "-"}
-                </Text>
+                <StatusBadge
+                  value={selectedBooking.paymentStatus ?? "—"}
+                  theme={theme}
+                />
               </View>
+
+              {/* Used badge */}
               <View style={styles.detailRow}>
                 <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
                   Used
                 </Text>
-                <Text style={[styles.metaValue, { color: theme.colors.text }]}>
-                  {selectedBooking.isUsed ? "Yes" : "No"}
-                </Text>
+                <View
+                  style={[
+                    styles.badge,
+                    {
+                      backgroundColor: selectedBooking.isUsed
+                        ? theme.colors.errorSubtle
+                        : theme.colors.successSubtle,
+                      borderColor: selectedBooking.isUsed
+                        ? theme.colors.error
+                        : theme.colors.success,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.badgeText,
+                      {
+                        color: selectedBooking.isUsed
+                          ? theme.colors.error
+                          : theme.colors.success,
+                      },
+                    ]}
+                  >
+                    {selectedBooking.isUsed ? "YES" : "NO"}
+                  </Text>
+                </View>
               </View>
             </View>
 
+            {/* Visitor stepper */}
             <Text style={[styles.inputLabel, { color: theme.colors.muted }]}>
               People to verify
             </Text>
             <Text style={[styles.helperText, { color: theme.colors.muted }]}>
-              Max allowed for this ticket: {selectedBooking.allowVisitors ?? 0}
+              Max allowed: {maxVisitors}
             </Text>
+
             <View
               style={[
                 styles.stepper,
@@ -648,65 +755,65 @@ export default function ScannerScreen() {
                 },
               ]}
             >
+              {/* Decrement */}
               <Pressable
                 accessibilityRole="button"
-                onPress={() =>
-                  setAllowUserInput((current) => {
-                    const currentValue = Number.parseInt(current || "1", 10);
-                    return String(Math.max(1, currentValue - 1));
-                  })
-                }
+                onPress={decrement}
                 disabled={
-                  isSubmittingEntry ||
-                  selectedBooking.isUsed ||
-                  (selectedBooking.allowVisitors ?? 0) === 0 ||
-                  Number.parseInt(allowUserInput || "1", 10) <= 1
+                  isSubmittingEntry || ticketExhausted || stepperValue <= 1
                 }
                 style={({ pressed }) => [
                   styles.stepperButton,
                   {
                     borderColor: theme.colors.border,
                     opacity:
-                      isSubmittingEntry ||
-                      selectedBooking.isUsed ||
-                      (selectedBooking.allowVisitors ?? 0) === 0 ||
-                      Number.parseInt(allowUserInput || "1", 10) <= 1
-                        ? 0.35
+                      isSubmittingEntry || ticketExhausted || stepperValue <= 1
+                        ? 0.3
                         : pressed
-                          ? 0.8
+                          ? 0.7
                           : 1,
                   },
                 ]}
               >
-                <Text style={[styles.stepperButtonText, { color: theme.colors.text }]}>
-                  -
+                <Text
+                  style={[
+                    styles.stepperButtonText,
+                    { color: theme.colors.text },
+                  ]}
+                >
+                  −
                 </Text>
               </Pressable>
 
+              {/* Value */}
               <View style={styles.stepperValueWrap}>
-                <Text style={[styles.stepperValue, { color: theme.colors.text }]}>
-                  {allowUserInput || "1"}
+                <Text
+                  style={[
+                    styles.stepperValue,
+                    {
+                      color: ticketExhausted
+                        ? theme.colors.muted
+                        : theme.colors.text,
+                    },
+                  ]}
+                >
+                  {ticketExhausted ? "—" : stepperValue}
                 </Text>
-                <Text style={[styles.stepperCaption, { color: theme.colors.muted }]}>
-                  1 to {selectedBooking.allowVisitors ?? 0}
+                <Text
+                  style={[styles.stepperCaption, { color: theme.colors.muted }]}
+                >
+                  1 to {maxVisitors}
                 </Text>
               </View>
 
+              {/* Increment */}
               <Pressable
                 accessibilityRole="button"
-                onPress={() =>
-                  setAllowUserInput((current) => {
-                    const currentValue = Number.parseInt(current || "1", 10);
-                    const maxAllowed = selectedBooking.allowVisitors ?? 0;
-                    return String(Math.min(maxAllowed, currentValue + 1));
-                  })
-                }
+                onPress={increment}
                 disabled={
                   isSubmittingEntry ||
-                  selectedBooking.isUsed ||
-                  (selectedBooking.allowVisitors ?? 0) === 0 ||
-                  Number.parseInt(allowUserInput || "1", 10) >=
-                    (selectedBooking.allowVisitors ?? 0)
+                  ticketExhausted ||
+                  stepperValue >= maxVisitors
                 }
                 style={({ pressed }) => [
                   styles.stepperButton,
@@ -714,31 +821,36 @@ export default function ScannerScreen() {
                     borderColor: theme.colors.border,
                     opacity:
                       isSubmittingEntry ||
-                      selectedBooking.isUsed ||
-                      (selectedBooking.allowVisitors ?? 0) === 0 ||
-                      Number.parseInt(allowUserInput || "1", 10) >=
-                        (selectedBooking.allowVisitors ?? 0)
-                        ? 0.35
+                      ticketExhausted ||
+                      stepperValue >= maxVisitors
+                        ? 0.3
                         : pressed
-                          ? 0.8
+                          ? 0.7
                           : 1,
                   },
                 ]}
               >
-                <Text style={[styles.stepperButtonText, { color: theme.colors.text }]}>
+                <Text
+                  style={[
+                    styles.stepperButtonText,
+                    { color: theme.colors.text },
+                  ]}
+                >
                   +
                 </Text>
               </Pressable>
             </View>
 
             <PrimaryButton
-              label={isSubmittingEntry ? "Verifying..." : "Verify"}
-              onPress={() => void submitAllowedVisitors()}
-              disabled={
-                isSubmittingEntry ||
-                selectedBooking.isUsed ||
-                (selectedBooking.allowVisitors ?? 0) === 0
+              label={
+                isSubmittingEntry
+                  ? "Verifying…"
+                  : ticketExhausted
+                    ? "Ticket Exhausted"
+                    : "Verify Entry"
               }
+              onPress={() => void submitAllowedVisitors()}
+              disabled={isSubmittingEntry || ticketExhausted}
             />
           </>
         ) : (
@@ -747,12 +859,18 @@ export default function ScannerScreen() {
           </Text>
         )}
       </InfoCard>
+
+      {/* ── Scan history table ─────────────────────────────────────────────── */}
       <InfoCard
         title="Scanned QR table"
-        subtitle="Every scan is stored locally and can be synced to the backend in batch format."
+        subtitle="Every scan is stored locally and can be synced to the backend in batch."
       >
         <PrimaryButton
-          label={isSyncingTable ? "Syncing..." : "Sync Table With Backend"}
+          label={
+            isSyncingTable
+              ? "Syncing…"
+              : `Sync Table${pendingSyncCount > 0 ? ` (${pendingSyncCount})` : ""}`
+          }
           onPress={() => void syncHistoryTable()}
           disabled={isSyncingTable || pendingSyncCount === 0}
         />
@@ -763,93 +881,134 @@ export default function ScannerScreen() {
   );
 }
 
+// ─── Small helper component ────────────────────────────────────────────────────
+function MetaRow({
+  label,
+  value,
+  theme,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  theme: ReturnType<typeof getTheme>;
+  highlight?: boolean;
+}) {
+  return (
+    <View style={styles.metaRow}>
+      <Text style={[styles.metaLabel, { color: theme.colors.muted }]}>
+        {label}
+      </Text>
+      <Text
+        style={[
+          styles.metaValue,
+          { color: highlight ? theme.colors.warning : theme.colors.text },
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-  },
-  content: {
-    gap: 16,
-    padding: 20,
-  },
-  hero: {
-    minHeight: 320,
-  },
+  screen: { flex: 1 },
+  content: { gap: 14, padding: 16, paddingBottom: 40 },
+  hero: { minHeight: 280 },
+
+  // Camera
   cameraFrame: {
-    borderRadius: 28,
+    borderRadius: 24,
     borderWidth: 2,
     flex: 1,
-    minHeight: 320,
+    minHeight: 280,
     overflow: "hidden",
     position: "relative",
   },
   scanGuide: {
     alignSelf: "center",
-    borderRadius: 24,
-    borderWidth: 3,
-    height: 220,
-    marginTop: 42,
-    width: 220,
+    borderRadius: 20,
+    borderWidth: 2.5,
+    height: 200,
+    marginTop: 38,
+    overflow: "hidden",
+    width: 200,
+  },
+  scanLine: {
+    height: 2,
+    width: "100%",
+    borderRadius: 1,
+    opacity: 0.85,
   },
   flashButton: {
     alignItems: "center",
-    borderRadius: 999,
+    borderRadius: 99,
     flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     position: "absolute",
-    right: 16,
-    top: 16,
+    right: 14,
+    top: 14,
   },
-  flashButtonLabel: {
-    fontSize: 14,
-    fontWeight: "700",
+  flashButtonLabel: { fontSize: 13, fontWeight: "700" },
+  liveTag: {
+    alignItems: "center",
+    borderRadius: 99,
+    bottom: 14,
+    flexDirection: "row",
+    gap: 5,
+    left: 14,
+    position: "absolute",
   },
+  liveDot: { borderRadius: 99, height: 6, width: 6 },
+  liveText: { fontSize: 10, fontWeight: "800", letterSpacing: 1.2 },
+
+  // Meta rows
   metaRow: {
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 12,
-  },
-  metaLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  metaValue: {
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  tableSpacer: {
-    height: 16,
-  },
-  detailGrid: {
-    gap: 12,
-    marginBottom: 18,
-  },
-  detailRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  inputLabel: {
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.2,
-    marginBottom: 6,
-    textTransform: "uppercase",
-  },
-  helperText: {
-    fontSize: 13,
-    lineHeight: 18,
     marginBottom: 10,
   },
+  metaLabel: { fontSize: 13, fontWeight: "600" },
+  metaValue: { fontSize: 13, fontWeight: "700" },
+
+  // Detail grid
+  detailGrid: { gap: 0, marginBottom: 16 },
+  detailRow: {
+    alignItems: "center",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 9,
+  },
+
+  // Badge
+  badge: {
+    borderRadius: 6,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  badgeText: { fontSize: 10, fontWeight: "800", letterSpacing: 0.5 },
+
+  // Stepper
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8,
+    marginBottom: 4,
+    textTransform: "uppercase",
+  },
+  helperText: { fontSize: 12, lineHeight: 18, marginBottom: 10 },
   stepper: {
     alignItems: "center",
     borderRadius: 16,
     borderWidth: 1,
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 14,
+    marginBottom: 12,
     padding: 10,
   },
   stepperButton: {
@@ -860,34 +1019,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 48,
   },
-  stepperButtonText: {
-    fontSize: 26,
-    fontWeight: "800",
-    lineHeight: 28,
-  },
-  stepperValueWrap: {
-    alignItems: "center",
-    flex: 1,
-    justifyContent: "center",
-  },
-  stepperValue: {
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  stepperCaption: {
-    fontSize: 12,
-    marginTop: 4,
-  },
-  allowInput: {
-    borderRadius: 16,
-    borderWidth: 1,
-    fontSize: 16,
-    marginBottom: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
+  stepperButtonText: { fontSize: 26, fontWeight: "800", lineHeight: 28 },
+  stepperValueWrap: { alignItems: "center", flex: 1, justifyContent: "center" },
+  stepperValue: { fontSize: 24, fontWeight: "800" },
+  stepperCaption: { fontSize: 11, marginTop: 3 },
+
+  // Misc
+  tableSpacer: { height: 14 },
   emptyStateText: {
-    fontSize: 14,
+    fontSize: 13,
     lineHeight: 20,
+    textAlign: "center",
+    paddingVertical: 12,
   },
 });
