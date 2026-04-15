@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios from "axios";
 import { type TicketScanRecord } from "../store/useAppStore";
+import { useAppStore } from "../store/useAppStore";
 
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ||
@@ -102,6 +103,20 @@ const api = axios.create({
 });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function getAuthConfig() {
+  const token = useAppStore.getState().user?.token;
+
+  if (!token) {
+    return {};
+  }
+
+  return {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  };
+}
 
 async function mockCreateTicket(
   payload: CreateTicketPayload,
@@ -243,8 +258,9 @@ export async function verifyTicket(
   }
 
   const response = await api.get<VerifyTicketApiResponse>(
-    "/api/v1/booking/ticket-verify",
+    "/api/v1/booking/ticket-detail",
     {
+      ...getAuthConfig(),
       params: {
         u_id: ticketId,
       },
@@ -296,7 +312,8 @@ export async function fetchTicketDetail(
   if (!response.data.status || !response.data.data) {
     return {
       status: "invalid",
-      message: response.data.message || "The scanned ticket could not be found.",
+      message:
+        response.data.message || "The scanned ticket could not be found.",
       ticketId,
     };
   }
@@ -340,6 +357,7 @@ export async function verifyTicketEntry(
       allow_user: allowUser,
     },
     {
+      ...getAuthConfig(),
       params: {
         u_id: ticketId,
       },

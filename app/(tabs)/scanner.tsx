@@ -4,7 +4,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
   Vibration,
 } from "react-native";
@@ -209,7 +208,7 @@ export default function ScannerScreen() {
         if (result.status === "valid") {
           const remainingVisitors = result.allowVisitors ?? 0;
           const defaultAllowUser =
-            remainingVisitors > 0 ? String(remainingVisitors) : "";
+            remainingVisitors > 0 ? "1" : "";
           const record = {
             id: `${Date.now()}-${resolvedTicketId}`,
             ticketId: resolvedTicketId,
@@ -351,7 +350,7 @@ export default function ScannerScreen() {
         isUsed,
         updatedAt: new Date().toISOString(),
       });
-      setAllowUserInput(nextAllowVisitors > 0 ? String(nextAllowVisitors) : "");
+      setAllowUserInput(nextAllowVisitors > 0 ? "1" : "");
       setScanState({
         status: "success",
         title: "Visitors Allowed",
@@ -640,22 +639,97 @@ export default function ScannerScreen() {
             <Text style={[styles.helperText, { color: theme.colors.muted }]}>
               Max allowed for this ticket: {selectedBooking.allowVisitors ?? 0}
             </Text>
-            <TextInput
-              keyboardType="number-pad"
-              value={allowUserInput}
-              onChangeText={setAllowUserInput}
-              placeholder="Enter number of people"
-              placeholderTextColor={theme.colors.muted}
-              editable={!isSubmittingEntry && !selectedBooking.isUsed}
+            <View
               style={[
-                styles.allowInput,
+                styles.stepper,
                 {
                   backgroundColor: theme.colors.surface,
                   borderColor: theme.colors.border,
-                  color: theme.colors.text,
                 },
               ]}
-            />
+            >
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  setAllowUserInput((current) => {
+                    const currentValue = Number.parseInt(current || "1", 10);
+                    return String(Math.max(1, currentValue - 1));
+                  })
+                }
+                disabled={
+                  isSubmittingEntry ||
+                  selectedBooking.isUsed ||
+                  (selectedBooking.allowVisitors ?? 0) === 0 ||
+                  Number.parseInt(allowUserInput || "1", 10) <= 1
+                }
+                style={({ pressed }) => [
+                  styles.stepperButton,
+                  {
+                    borderColor: theme.colors.border,
+                    opacity:
+                      isSubmittingEntry ||
+                      selectedBooking.isUsed ||
+                      (selectedBooking.allowVisitors ?? 0) === 0 ||
+                      Number.parseInt(allowUserInput || "1", 10) <= 1
+                        ? 0.35
+                        : pressed
+                          ? 0.8
+                          : 1,
+                  },
+                ]}
+              >
+                <Text style={[styles.stepperButtonText, { color: theme.colors.text }]}>
+                  -
+                </Text>
+              </Pressable>
+
+              <View style={styles.stepperValueWrap}>
+                <Text style={[styles.stepperValue, { color: theme.colors.text }]}>
+                  {allowUserInput || "1"}
+                </Text>
+                <Text style={[styles.stepperCaption, { color: theme.colors.muted }]}>
+                  1 to {selectedBooking.allowVisitors ?? 0}
+                </Text>
+              </View>
+
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  setAllowUserInput((current) => {
+                    const currentValue = Number.parseInt(current || "1", 10);
+                    const maxAllowed = selectedBooking.allowVisitors ?? 0;
+                    return String(Math.min(maxAllowed, currentValue + 1));
+                  })
+                }
+                disabled={
+                  isSubmittingEntry ||
+                  selectedBooking.isUsed ||
+                  (selectedBooking.allowVisitors ?? 0) === 0 ||
+                  Number.parseInt(allowUserInput || "1", 10) >=
+                    (selectedBooking.allowVisitors ?? 0)
+                }
+                style={({ pressed }) => [
+                  styles.stepperButton,
+                  {
+                    borderColor: theme.colors.border,
+                    opacity:
+                      isSubmittingEntry ||
+                      selectedBooking.isUsed ||
+                      (selectedBooking.allowVisitors ?? 0) === 0 ||
+                      Number.parseInt(allowUserInput || "1", 10) >=
+                        (selectedBooking.allowVisitors ?? 0)
+                        ? 0.35
+                        : pressed
+                          ? 0.8
+                          : 1,
+                  },
+                ]}
+              >
+                <Text style={[styles.stepperButtonText, { color: theme.colors.text }]}>
+                  +
+                </Text>
+              </Pressable>
+            </View>
 
             <PrimaryButton
               label={isSubmittingEntry ? "Verifying..." : "Verify"}
@@ -768,6 +842,41 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     marginBottom: 10,
+  },
+  stepper: {
+    alignItems: "center",
+    borderRadius: 16,
+    borderWidth: 1,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 14,
+    padding: 10,
+  },
+  stepperButton: {
+    alignItems: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+    height: 48,
+    justifyContent: "center",
+    width: 48,
+  },
+  stepperButtonText: {
+    fontSize: 26,
+    fontWeight: "800",
+    lineHeight: 28,
+  },
+  stepperValueWrap: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
+  },
+  stepperValue: {
+    fontSize: 24,
+    fontWeight: "800",
+  },
+  stepperCaption: {
+    fontSize: 12,
+    marginTop: 4,
   },
   allowInput: {
     borderRadius: 16,
