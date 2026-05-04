@@ -10,6 +10,7 @@
     "web": "expo start --web",
     "build:android:dev": "eas build --platform android --profile development",
     "build:android:preview": "eas build --platform android --profile preview",
+    "build:android:test-apk": "eas build --platform android --profile production-testing",
     "build:android:prod": "eas build --platform android --profile production"
   },
   "dependencies": {

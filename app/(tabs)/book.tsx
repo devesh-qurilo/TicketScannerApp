@@ -1,12 +1,5 @@
 import { useState } from "react";
-import {
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  Share,
-} from "react-native";
+import { Alert, ScrollView, StyleSheet, Text, View, Share } from "react-native";
 
 import FormField from "../../components/FormField";
 import InfoCard from "../../components/InfoCard";
@@ -22,8 +15,10 @@ export default function BookTicketScreen() {
   const theme = getTheme(resolvedTheme);
 
   const [form, setForm] = useState({
-    name: "",
+    username: "",
+    eventId: "69df6a37b89293f707579333",
     email: "",
+    totalTicket: "1",
     phone: "",
   });
   const [ticket, setTicket] = useState<CreateTicketResponse | null>(null);
@@ -34,17 +29,38 @@ export default function BookTicketScreen() {
   };
 
   const submit = async () => {
-    if (!form.name.trim() || !form.email.trim() || !form.phone.trim()) {
+    const totalTicket = Number(form.totalTicket);
+
+    if (
+      !form.username.trim() ||
+      !form.eventId.trim() ||
+      !form.email.trim() ||
+      !form.phone.trim()
+    ) {
       Alert.alert("Missing details", "Please complete all booking fields.");
+      return;
+    }
+
+    if (!Number.isInteger(totalTicket) || totalTicket < 1) {
+      Alert.alert("Invalid ticket count", "Please enter at least 1 ticket.");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const createdTicket = await createTicket(form);
+      const createdTicket = await createTicket({
+        username: form.username.trim(),
+        eventId: form.eventId.trim(),
+        email: form.email.trim(),
+        totalTicket,
+        phone: form.phone.trim(),
+      });
       setTicket(createdTicket);
     } catch (error) {
-      Alert.alert("Booking failed", "We could not create the ticket right now.");
+      Alert.alert(
+        "Booking failed",
+        "We could not create the ticket right now.",
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -58,7 +74,8 @@ export default function BookTicketScreen() {
     const shared = await shareTicketQr(ticket);
     if (!shared) {
       await Share.share({
-        message: `Ticket ${ticket.ticketId} for ${ticket.name}\n${ticket.qrCode ?? ""}`.trim(),
+        message:
+          `Ticket ${ticket.ticketId} for ${ticket.name}\n${ticket.qrCode ?? ""}`.trim(),
       });
     }
   };
@@ -75,9 +92,16 @@ export default function BookTicketScreen() {
       >
         <FormField
           label="Full Name"
-          value={form.name}
-          onChangeText={(value) => onChange("name", value)}
+          value={form.username}
+          onChangeText={(value) => onChange("username", value)}
           placeholder="Aarav Sharma"
+        />
+        <FormField
+          label="Event ID"
+          value={form.eventId}
+          onChangeText={(value) => onChange("eventId", value)}
+          placeholder="69df6a37b89293f707579333"
+          autoCapitalize="none"
         />
         <FormField
           label="Email"
@@ -94,27 +118,19 @@ export default function BookTicketScreen() {
           placeholder="+91 98765 43210"
           keyboardType="phone-pad"
         />
+        <FormField
+          label="Total Tickets"
+          value={form.totalTicket}
+          onChangeText={(value) => onChange("totalTicket", value)}
+          placeholder="1"
+          keyboardType="number-pad"
+        />
         <PrimaryButton
           label={isSubmitting ? "Booking..." : "Book Ticket"}
           onPress={() => void submit()}
           disabled={isSubmitting}
         />
       </InfoCard>
-
-      {ticket ? (
-        <TicketPreviewCard ticket={ticket} onShare={() => void shareTicket()} />
-      ) : (
-        <InfoCard
-          title="No ticket yet"
-          subtitle="Once a ticket is booked, the attendee QR and confirmation details will appear here."
-        >
-          <View style={[styles.placeholder, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
-            <Text style={[styles.placeholderText, { color: theme.colors.muted }]}>
-              Ticket previews support either a backend QR image or an auto-generated QR from the returned ticket ID.
-            </Text>
-          </View>
-        </InfoCard>
-      )}
     </ScrollView>
   );
 }

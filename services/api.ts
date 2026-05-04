@@ -4,8 +4,7 @@ import { type TicketScanRecord } from "../store/useAppStore";
 import { useAppStore } from "../store/useAppStore";
 
 const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL?.trim() ||
-  "https://4frnn03l-8000.inc1.devtunnels.ms";
+  process.env.EXPO_PUBLIC_API_BASE_URL?.trim() || "https://bbsapi.qurilo.com";
 const OFFLINE_QUEUE_KEY = "offline-verification-queue";
 const USE_MOCK_API = API_BASE_URL.includes("your-api.com");
 
@@ -64,15 +63,35 @@ type VerifyTicketApiResponse = {
 };
 
 export type CreateTicketPayload = {
-  name: string;
+  username: string;
+  eventId: string;
   email: string;
+  totalTicket: number;
   phone: string;
 };
 
-export type CreateTicketResponse = CreateTicketPayload & {
+export type CreateTicketResponse = {
+  name: string;
+  email: string;
+  phone: string;
+  totalTicket: number;
+  eventId?: string;
   ticketId: string;
   qrCode?: string;
 };
+
+type CreateTicketApiData = Partial<CreateTicketResponse> &
+  Partial<VerifyTicketApiData> & {
+  username?: string;
+};
+
+type CreateTicketApiResponse =
+  | CreateTicketResponse
+  | {
+      status?: boolean;
+      message?: string;
+      data?: CreateTicketApiData;
+    };
 
 export type LoginResponse = {
   token: string;
@@ -124,7 +143,11 @@ async function mockCreateTicket(
   await sleep(700);
 
   return {
-    ...payload,
+    name: payload.username,
+    email: payload.email,
+    phone: payload.phone,
+    totalTicket: payload.totalTicket,
+    eventId: payload.eventId,
     ticketId: `TKT-${Date.now().toString().slice(-8)}`,
   };
 }
@@ -243,11 +266,26 @@ export async function createTicket(
     return mockCreateTicket(payload);
   }
 
-  const response = await api.post<CreateTicketResponse>(
-    "/api/tickets/create",
+  const response = await api.post<CreateTicketApiResponse>(
+    "/api/v1/booking/create-ticket",
     payload,
   );
-  return response.data;
+
+  const responseBody = response.data;
+  const ticket: CreateTicketApiData =
+    "data" in responseBody && responseBody.data
+      ? responseBody.data
+      : (responseBody as CreateTicketApiData);
+
+  return {
+    name: ticket.username ?? ticket.name ?? payload.username,
+    email: ticket.email ?? payload.email,
+    phone: ticket.phone ?? payload.phone,
+    totalTicket: ticket.totalTicket ?? payload.totalTicket,
+    eventId: ticket.eventId ?? payload.eventId,
+    ticketId: ticket.u_id ?? ticket.ticketId ?? ticket._id ?? `TKT-${Date.now()}`,
+    qrCode: ticket.qrCode,
+  };
 }
 
 export async function verifyTicket(

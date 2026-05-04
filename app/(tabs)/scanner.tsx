@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  AppState,
   Easing,
   Pressable,
   ScrollView,
@@ -170,6 +171,9 @@ export default function ScannerScreen() {
   const [isSubmittingEntry, setIsSubmittingEntry] = useState(false);
   const [scanState, setScanState] = useState<ScanState>(defaultState);
   const [isFocused, setIsFocused] = useState(true);
+  const [isAppActive, setIsAppActive] = useState(
+    AppState.currentState === "active",
+  );
   const [selectedBooking, setSelectedBooking] =
     useState<TicketDetailResponse | null>(null);
   const [allowUserInput, setAllowUserInput] = useState("");
@@ -177,6 +181,7 @@ export default function ScannerScreen() {
   const lastHandledRef = useRef<{ ticketId: string; at: number } | null>(null);
   const successSoundRef = useRef<Audio.Sound | null>(null);
   const errorSoundRef = useRef<Audio.Sound | null>(null);
+  const audioReadyRef = useRef(false);
 
   // ── Camera overlay color ──────────────────────────────────────────────────
   const overlayColor = useMemo(() => {
@@ -204,53 +209,78 @@ export default function ScannerScreen() {
   useEffect(() => {
     void getOfflineQueue().then(setOfflineQueue);
   }, [setOfflineQueue]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (nextState) => {
+      setIsAppActive(nextState === "active");
+    });
+    return () => subscription.remove();
+  }, []);
 
   // ── Audio setup ───────────────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
     (async () => {
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-      });
-      const s = new Audio.Sound();
-      const e = new Audio.Sound();
-      await s.loadAsync(require("../../assets/sounds/success.wav"));
-      await e.loadAsync(require("../../assets/sounds/error.wav"));
-      if (!mounted) {
-        await s.unloadAsync();
-        await e.unloadAsync();
-        return;
+      if (!isAppActive) return;
+      try {
+        await Audio.setAudioModeAsync({
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+        });
+        const s = new Audio.Sound();
+        const e = new Audio.Sound();
+        await s.loadAsync(require("../../assets/sounds/success.wav"));
+        await e.loadAsync(require("../../assets/sounds/error.wav"));
+        if (!mounted) {
+          await s.unloadAsync();
+          await e.unloadAsync();
+          return;
+        }
+        successSoundRef.current = s;
+        errorSoundRef.current = e;
+        audioReadyRef.current = true;
+      } catch {
+        audioReadyRef.current = false;
       }
-      successSoundRef.current = s;
-      errorSoundRef.current = e;
     })();
     return () => {
       mounted = false;
+      audioReadyRef.current = false;
       void successSoundRef.current?.unloadAsync();
       void errorSoundRef.current?.unloadAsync();
+      successSoundRef.current = null;
+      errorSoundRef.current = null;
     };
-  }, []);
+  }, [isAppActive]);
 
   // ── Haptic + audio feedback ───────────────────────────────────────────────
-  const feedback = useCallback(async (status: ScanState["status"]) => {
-    const play = async (snd: Audio.Sound | null) => {
-      if (snd) await snd.replayAsync();
-    };
-    if (status === "success") {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Vibration.vibrate(120);
-      await play(successSoundRef.current);
-    } else if (status === "warning") {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      Vibration.vibrate([0, 100, 80, 100]);
-      await play(errorSoundRef.current);
-    } else if (status === "error") {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Vibration.vibrate([0, 180, 120, 180]);
-      await play(errorSoundRef.current);
-    }
-  }, []);
+  const feedback = useCallback(
+    async (status: ScanState["status"]) => {
+      const play = async (snd: Audio.Sound | null) => {
+        if (!isAppActive || !audioReadyRef.current || !snd) return;
+        try {
+          await snd.replayAsync();
+        } catch {}
+      };
+      if (status === "success") {
+        await Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Success,
+        );
+        Vibration.vibrate(120);
+        await play(successSoundRef.current);
+      } else if (status === "warning") {
+        await Haptics.notificationAsync(
+          Haptics.NotificationFeedbackType.Warning,
+        );
+        Vibration.vibrate([0, 100, 80, 100]);
+        await play(errorSoundRef.current);
+      } else if (status === "error") {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Vibration.vibrate([0, 180, 120, 180]);
+        await play(errorSoundRef.current);
+      }
+    },
+    [isAppActive],
+  );
 
   // ── QR processing ─────────────────────────────────────────────────────────
   const processTicket = useCallback(
@@ -277,6 +307,8 @@ export default function ScannerScreen() {
         return;
       }
 
+      if (selectedBooking?.ticketId === ticketId) return;
+
       const now = Date.now();
       if (
         lastHandledRef.current?.ticketId === ticketId &&
@@ -284,6 +316,8 @@ export default function ScannerScreen() {
       )
         return;
       lastHandledRef.current = { ticketId, at: now };
+      setSelectedBooking(null);
+      setAllowUserInput("");
       setIsBusy(true);
 
       try {
@@ -381,7 +415,13 @@ export default function ScannerScreen() {
         setIsBusy(false);
       }
     },
-    [addScanRecord, feedback, setLastScannedTicket, setOfflineQueue],
+    [
+      addScanRecord,
+      feedback,
+      selectedBooking?.ticketId,
+      setLastScannedTicket,
+      setOfflineQueue,
+    ],
   );
 
   // ── Visitor entry submit ──────────────────────────────────────────────────
@@ -415,15 +455,8 @@ export default function ScannerScreen() {
         selectedBooking.ticketId,
         allowUser,
       );
-      const nextAllowed = Math.max(remaining - allowUser, 0);
-      const isUsed = nextAllowed === 0;
-      setSelectedBooking({
-        ...selectedBooking,
-        allowVisitors: nextAllowed,
-        isUsed,
-        updatedAt: new Date().toISOString(),
-      });
-      setAllowUserInput(nextAllowed > 0 ? "1" : "");
+      setSelectedBooking(null);
+      setAllowUserInput("");
       setScanState({
         status: "success",
         title: "Visitors Allowed",
@@ -512,7 +545,7 @@ export default function ScannerScreen() {
     }
   }, [markScanRecordsFailed, markScanRecordsSynced, scanHistory]);
 
-  const scannerEnabled = hasPermission && !!device && isFocused;
+  const scannerEnabled = hasPermission && !!device && isFocused && isAppActive;
   const pendingSyncCount = scanHistory.filter(
     (r) => r.syncStatus !== "synced",
   ).length;
@@ -620,7 +653,7 @@ export default function ScannerScreen() {
       />
 
       {/* ── Scanner controls ───────────────────────────────────────────────── */}
-      <InfoCard
+      {/* <InfoCard
         title="Scanner controls"
         subtitle="Duplicate scans are blocked for 2.5 s so one ticket only validates once per pass."
       >
@@ -647,7 +680,7 @@ export default function ScannerScreen() {
           disabled={isBusy || offlineQueue.length === 0}
           variant="secondary"
         />
-      </InfoCard>
+      </InfoCard> */}
 
       {/* ── Ticket details ─────────────────────────────────────────────────── */}
       <InfoCard
@@ -861,7 +894,7 @@ export default function ScannerScreen() {
       </InfoCard>
 
       {/* ── Scan history table ─────────────────────────────────────────────── */}
-      <InfoCard
+      {/* <InfoCard
         title="Scanned QR table"
         subtitle="Every scan is stored locally and can be synced to the backend in batch."
       >
@@ -876,7 +909,7 @@ export default function ScannerScreen() {
         />
         <View style={styles.tableSpacer} />
         <ScanHistoryTable records={scanHistory} />
-      </InfoCard>
+      </InfoCard> */}
     </ScrollView>
   );
 }
