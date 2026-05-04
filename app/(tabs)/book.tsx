@@ -1,28 +1,45 @@
 import { useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, View, Share } from "react-native";
+import { ScrollView, StyleSheet, Share } from "react-native";
 
 import FormField from "../../components/FormField";
 import InfoCard from "../../components/InfoCard";
 import PrimaryButton from "../../components/PrimaryButton";
+import StatusBanner from "../../components/StatusBanner";
 import TicketPreviewCard from "../../components/TicketPreviewCard";
 import { createTicket, type CreateTicketResponse } from "../../services/api";
 import { useAppStore } from "../../store/useAppStore";
 import { shareTicketQr } from "../../utils/share";
 import { getTheme } from "../../utils/theme";
 
+type BookingState = {
+  status: "idle" | "success" | "error" | "warning";
+  title: string;
+  message: string;
+};
+
+const defaultBookingState: BookingState = {
+  status: "idle",
+  title: "Ready to book",
+  message: "Enter attendee details and create the ticket.",
+};
+
+const initialFormState = {
+  username: "",
+  eventId: "69f83bdf49a8758aba27ba80",
+  email: "",
+  totalTicket: "1",
+  phone: "",
+};
+
 export default function BookTicketScreen() {
   const resolvedTheme = useAppStore((state) => state.resolvedTheme);
   const theme = getTheme(resolvedTheme);
 
-  const [form, setForm] = useState({
-    username: "",
-    eventId: "69df6a37b89293f707579333",
-    email: "",
-    totalTicket: "1",
-    phone: "",
-  });
+  const [form, setForm] = useState(initialFormState);
   const [ticket, setTicket] = useState<CreateTicketResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [bookingState, setBookingState] =
+    useState<BookingState>(defaultBookingState);
 
   const onChange = (key: keyof typeof form, value: string) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -37,16 +54,31 @@ export default function BookTicketScreen() {
       !form.email.trim() ||
       !form.phone.trim()
     ) {
-      Alert.alert("Missing details", "Please complete all booking fields.");
+      setBookingState({
+        status: "error",
+        title: "Missing details",
+        message: "Please complete all booking fields.",
+      });
       return;
     }
 
     if (!Number.isInteger(totalTicket) || totalTicket < 1) {
-      Alert.alert("Invalid ticket count", "Please enter at least 1 ticket.");
+      setBookingState({
+        status: "error",
+        title: "Invalid ticket count",
+        message: "Please enter at least 1 ticket.",
+      });
       return;
     }
 
+    setTicket(null);
     setIsSubmitting(true);
+    setBookingState({
+      status: "warning",
+      title: "Creating ticket",
+      message: "Please wait while we create the booking.",
+    });
+
     try {
       const createdTicket = await createTicket({
         username: form.username.trim(),
@@ -56,11 +88,18 @@ export default function BookTicketScreen() {
         phone: form.phone.trim(),
       });
       setTicket(createdTicket);
-    } catch (error) {
-      Alert.alert(
-        "Booking failed",
-        "We could not create the ticket right now.",
-      );
+      setForm(initialFormState);
+      setBookingState({
+        status: "success",
+        title: "Ticket booked successfully",
+        message: `Ticket is ready to share on email and whatsapp`,
+      });
+    } catch {
+      setBookingState({
+        status: "error",
+        title: "Booking failed",
+        message: "We could not create the ticket right now.",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -86,9 +125,15 @@ export default function BookTicketScreen() {
       style={[styles.screen, { backgroundColor: theme.colors.background }]}
       showsVerticalScrollIndicator={false}
     >
+      <StatusBanner
+        status={bookingState.status}
+        title={bookingState.title}
+        message={bookingState.message}
+      />
+
       <InfoCard
         title="Issue a new event ticket"
-        subtitle="Capture attendee details, create the booking, and share the QR instantly."
+        subtitle="Capture attendee details, create the booking,"
       >
         <FormField
           label="Full Name"
@@ -100,8 +145,10 @@ export default function BookTicketScreen() {
           label="Event ID"
           value={form.eventId}
           onChangeText={(value) => onChange("eventId", value)}
-          placeholder="69df6a37b89293f707579333"
-          autoCapitalize="none"
+          placeholder="69f83bdf49a8758aba27ba80"
+          editable={false} // This prevents the user from typing
+          selectTextOnFocus={false}
+          style={{ opacity: 0.5, backgroundColor: "#f0f0f0" }} // Visual feedback
         />
         <FormField
           label="Email"
@@ -115,7 +162,7 @@ export default function BookTicketScreen() {
           label="Phone"
           value={form.phone}
           onChangeText={(value) => onChange("phone", value)}
-          placeholder="+91 98765 43210"
+          placeholder="9919090106"
           keyboardType="phone-pad"
         />
         <FormField
@@ -142,15 +189,5 @@ const styles = StyleSheet.create({
   content: {
     gap: 16,
     padding: 20,
-  },
-  placeholder: {
-    borderRadius: 20,
-    borderStyle: "dashed",
-    borderWidth: 1,
-    padding: 18,
-  },
-  placeholderText: {
-    fontSize: 14,
-    lineHeight: 20,
   },
 });

@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
   Vibration,
 } from "react-native";
@@ -176,6 +177,7 @@ export default function ScannerScreen() {
   );
   const [selectedBooking, setSelectedBooking] =
     useState<TicketDetailResponse | null>(null);
+  const [manualTicketCode, setManualTicketCode] = useState("");
   const [allowUserInput, setAllowUserInput] = useState("");
 
   const lastHandledRef = useRef<{ ticketId: string; at: number } | null>(null);
@@ -475,6 +477,23 @@ export default function ScannerScreen() {
     }
   }, [allowUserInput, feedback, selectedBooking]);
 
+  const submitManualTicketCode = useCallback(async () => {
+    const ticketCode = manualTicketCode.trim();
+
+    if (!ticketCode) {
+      setScanState({
+        status: "error",
+        title: "Ticket code required",
+        message: "Enter a ticket code to continue.",
+      });
+      await feedback("error");
+      return;
+    }
+
+    setManualTicketCode("");
+    await processTicket(ticketCode);
+  }, [feedback, manualTicketCode, processTicket]);
+
   // ── QR scanner hook ───────────────────────────────────────────────────────
   const codeScanner = useCodeScanner({
     codeTypes: ["qr"],
@@ -652,35 +671,41 @@ export default function ScannerScreen() {
         message={scanState.message}
       />
 
-      {/* ── Scanner controls ───────────────────────────────────────────────── */}
-      {/* <InfoCard
-        title="Scanner controls"
-        subtitle="Duplicate scans are blocked for 2.5 s so one ticket only validates once per pass."
+      <InfoCard
+        title="Manual ticket code"
+        subtitle="If a guest does not have a QR code, enter the ticket code here and continue with the same verification flow."
       >
-        <MetaRow
-          label="Last ticket"
-          value={lastScannedTicket?.ticketId ?? "None yet"}
-          theme={theme}
-        />
-        <MetaRow
-          label="Offline queue"
-          value={`${offlineQueue.length} pending`}
-          theme={theme}
-          highlight={offlineQueue.length > 0}
-        />
-        <MetaRow
-          label="History sync"
-          value={`${pendingSyncCount} pending`}
-          theme={theme}
-          highlight={pendingSyncCount > 0}
+        <Text style={[styles.inputLabel, { color: theme.colors.muted }]}>
+          Ticket code
+        </Text>
+        <TextInput
+          value={manualTicketCode}
+          onChangeText={setManualTicketCode}
+          placeholder="Enter ticket code"
+          placeholderTextColor={theme.colors.muted}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          editable={!isBusy && !isSubmittingEntry}
+          onSubmitEditing={() => {
+            void submitManualTicketCode();
+          }}
+          style={[
+            styles.manualInput,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+              color: theme.colors.text,
+            },
+          ]}
         />
         <PrimaryButton
-          label={isBusy ? "Working…" : "Retry Offline Queue"}
-          onPress={() => void retryQueue()}
-          disabled={isBusy || offlineQueue.length === 0}
-          variant="secondary"
+          label={isBusy ? "Checking…" : "Find Ticket"}
+          onPress={() => {
+            void submitManualTicketCode();
+          }}
+          disabled={isBusy || isSubmittingEntry}
         />
-      </InfoCard> */}
+      </InfoCard>
 
       {/* ── Ticket details ─────────────────────────────────────────────────── */}
       <InfoCard
@@ -892,24 +917,6 @@ export default function ScannerScreen() {
           </Text>
         )}
       </InfoCard>
-
-      {/* ── Scan history table ─────────────────────────────────────────────── */}
-      {/* <InfoCard
-        title="Scanned QR table"
-        subtitle="Every scan is stored locally and can be synced to the backend in batch."
-      >
-        <PrimaryButton
-          label={
-            isSyncingTable
-              ? "Syncing…"
-              : `Sync Table${pendingSyncCount > 0 ? ` (${pendingSyncCount})` : ""}`
-          }
-          onPress={() => void syncHistoryTable()}
-          disabled={isSyncingTable || pendingSyncCount === 0}
-        />
-        <View style={styles.tableSpacer} />
-        <ScanHistoryTable records={scanHistory} />
-      </InfoCard> */}
     </ScrollView>
   );
 }
@@ -1035,6 +1042,14 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   helperText: { fontSize: 12, lineHeight: 18, marginBottom: 10 },
+  manualInput: {
+    borderRadius: 14,
+    borderWidth: 1,
+    fontSize: 15,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
   stepper: {
     alignItems: "center",
     borderRadius: 16,
