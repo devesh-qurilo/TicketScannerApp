@@ -10,13 +10,15 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0E7490"
     },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow TicketScannerApp to access the camera for scanning event tickets."
-      }
+        "NSCameraUsageDescription": "Allow TicketScannerApp to access the camera for scanning event tickets.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.qurilo.bharatbhaktiscanner"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +26,10 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "permissions": ["android.permission.CAMERA"],
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.CAMERA"
+      ],
       "package": "com.qurilo.bharatbhaktiscanner"
     },
     "web": {
@@ -37,7 +42,8 @@
         {
           "cameraPermissionText": "Allow TicketScannerApp to access the camera for scanning event tickets."
         }
-      ]
+      ],
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true
@@ -47,6 +53,12 @@
       "eas": {
         "projectId": "e96b3756-f5ea-4728-beae-139e69e30534"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/e96b3756-f5ea-4728-beae-139e69e30534"
     }
   }
 }
